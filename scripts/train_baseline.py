@@ -36,8 +36,6 @@ from utils import (
     set_all_seeds, 
     get_repo_root, 
     get_dataset_path, 
-    load_splits,
-    create_subset_txt,
     print_section,
     format_time,
     get_timestamp,
@@ -49,17 +47,15 @@ from utils import (
 
 def create_training_config(
     dataset_path: Path,
-    splits: dict,
     output_dir: Path,
     class_names: list
 ) -> Path:
     """
-    Create a temporary YOLO config with correct paths.
+    Create a YOLO config pointing to the dataset directories.
     
     Args:
-        dataset_path: Path to AI-TOD dataset
-        splits: Dictionary with train/val/test splits
-        output_dir: Output directory for temp files
+        dataset_path: Path to AI-TOD dataset (with train/, val/, test/ folders)
+        output_dir: Output directory for config file
         class_names: List of class names
         
     Returns:
@@ -67,19 +63,13 @@ def create_training_config(
     """
     import yaml
     
-    # Create subset text files for train and val
-    train_txt = output_dir / "train.txt"
-    val_txt = output_dir / "val.txt"
-    
-    create_subset_txt(splits['train'], dataset_path, train_txt)
-    create_subset_txt(splits['val'], dataset_path, val_txt)
-    
-    # Create YOLO config
+    # Create YOLO config using standard directory structure
+    # (train/val/test are now physically separate folders)
     config = {
         'path': str(dataset_path.resolve()),
-        'train': str(train_txt.resolve()),
-        'val': str(val_txt.resolve()),
-        'test': str(dataset_path / "test" / "images"),
+        'train': 'train/images',
+        'val': 'val/images',
+        'test': 'test/images',
         'nc': len(class_names),
         'names': {i: name for i, name in enumerate(class_names)}
     }
@@ -129,23 +119,32 @@ def train_model(args):
     else:
         print("\n⚠ Skipping label format validation (--skip-validation)")
     
-    # Clear any stale cache files
-    if getattr(args, 'clear_cache', False):
-        print("\nClearing YOLO cache files...")
-        clear_yolo_cache(dataset_path)
+    # ALWAYS clear cache files to prevent train/val cache collision
+    # (both splits reference images from the same AI_TOD/train folder)
+    print("\nClearing YOLO cache files...")
+    clear_yolo_cache(dataset_path)
     
-    # Load splits
-    splits_path = repo_root / "configs" / "data_splits.json"
-    splits = load_splits(splits_path)
+    # Verify train/val directories exist
+    train_images_dir = dataset_path / "train" / "images"
+    val_images_dir = dataset_path / "val" / "images"
     
-    # Verify split integrity
-    with open(splits_path, 'r') as f:
-        split_data = json.load(f)
+    if not train_images_dir.exists():
+        print(f"ERROR: Train images directory not found: {train_images_dir}")
+        print("Run 'python3 scripts/split_train_val.py' first to create val split.")
+        sys.exit(1)
     
-    print(f"\nSplit configuration:")
-    print(f"  Seed: {split_data['metadata']['seed']}")
-    print(f"  Created: {split_data['metadata']['created']}")
-    print(f"  Hash: {split_data['metadata']['hash'][:16]}...")
+    if not val_images_dir.exists():
+        print(f"ERROR: Val images directory not found: {val_images_dir}")
+        print("Run 'python3 scripts/split_train_val.py' first to create val split.")
+        sys.exit(1)
+    
+    # Count images
+    train_count = len(list(train_images_dir.glob("*")))
+    val_count = len(list(val_images_dir.glob("*")))
+    
+    print(f"\nDataset split:")
+    print(f"  Train images: {train_count}")
+    print(f"  Val images:   {val_count}")
     
     # Class names from AI-TOD
     class_names = [
@@ -164,7 +163,7 @@ def train_model(args):
     
     # Create training config
     config_path = create_training_config(
-        dataset_path, splits, output_dir, class_names
+        dataset_path, output_dir, class_names
     )
     
     # Save training parameters
@@ -181,9 +180,8 @@ def train_model(args):
         'device': args.device,
         'timestamp': timestamp,
         'dataset_path': str(dataset_path),
-        'splits_file': str(splits_path),
-        'train_images': len(splits['train']),
-        'val_images': len(splits['val'])
+        'train_images': train_count,
+        'val_images': val_count
     }
     
     params_path = output_dir / "train_params.json"
@@ -219,6 +217,9 @@ def train_model(args):
         'verbose': True,
         'deterministic': True,
         'pretrained': True,
+        # Disable AMP to prevent gradient overflow with tiny objects
+        # (high cls_loss can cause numerical instability with float16)
+        'amp': False,
         # Additional augmentation settings for tiny objects
         'mosaic': 1.0,  # Enable mosaic augmentation
         'mixup': 0.0,   # Disable mixup (can harm tiny objects)

@@ -1,8 +1,8 @@
 # AI-TOD Dataset Configuration for Ultralytics YOLO
 # ================================================
 #
-# This config file follows Ultralytics format but actual splits
-# are controlled by configs/data_splits.json for reproducibility.
+# Dataset physically split into train/val/test folders.
+# Split was created using configs/data_splits.json via scripts/split_train_val.py
 #
 # Dataset: AI-TOD (Aerial Images for Tiny Object Detection)
 # Images: 27,955 total (800x800 resolution)
@@ -12,12 +12,11 @@
 # Path to dataset root (update for your environment)
 # Kaggle: /kaggle/input/ai-tod-dataset/AI_TOD
 # Local: ./AI_TOD
-path: /kaggle/input/ai-tod-dataset/AI_TOD
+path: AI_TOD
 
 # Dataset splits (relative to path)
-# Note: Actual train/val split is controlled by data_splits.json
 train: train/images
-val: train/images
+val: val/images
 test: test/images
 
 # Number of classes
