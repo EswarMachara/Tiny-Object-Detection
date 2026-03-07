@@ -61,25 +61,25 @@ EXPERIMENTS = {
     },
     'bifpn': {
         'name': 'YOLOv11M + P2 + BiFPN',
-        'model': None,  # Will use previous best
+        'model': 'yolo11m.pt',  # Pretrained weights for fair comparison
         'custom_model': 'models/yolo11m_p2_bifpn.yaml',
         'description': 'Adding BiFPN neck for multi-scale fusion'
     },
     'taam': {
         'name': 'YOLOv11M + P2 + BiFPN + TAAM',
-        'model': None,
+        'model': 'yolo11m.pt',  # Pretrained weights for fair comparison
         'custom_model': 'models/yolo11m_p2_bifpn_taam.yaml',
         'description': 'Adding Tiny-Aware Attention Module'
     },
     'anchorfree': {
         'name': 'YOLOv11M + P2 + BiFPN + TAAM + AnchorFree',
-        'model': None,
+        'model': 'yolo11m.pt',  # Pretrained weights for fair comparison
         'custom_model': 'models/yolo11m_p2_bifpn_taam_af.yaml',
         'description': 'Switching to anchor-free detection head'
     },
     'full': {
         'name': 'Full Proposed Method',
-        'model': None,
+        'model': 'yolo11m.pt',  # Pretrained weights for fair comparison
         'custom_model': 'models/yolo11m_full.yaml',
         'description': 'Complete method with NWD loss'
     }
@@ -328,12 +328,25 @@ def run_experiment(args):
 
 def list_experiments():
     """List all available experiments."""
+    repo_root = get_repo_root()
+    
     print("\nAvailable Ablation Experiments:")
     print("=" * 60)
     for key, config in EXPERIMENTS.items():
-        status = "✓ Ready" if config['custom_model'] is None or Path(config['custom_model']).stem == 'yolo11m_p2' else "○ Not implemented"
+        # Check if model file exists
+        if config['custom_model'] is None:
+            status = "✓ Ready (pretrained)"
+        else:
+            model_path = repo_root / config['custom_model']
+            if model_path.exists():
+                status = "✓ Ready"
+            else:
+                status = "○ Not implemented"
+        
         print(f"\n  {key:12s} - {config['name']}")
         print(f"               {config['description']}")
+        if config['custom_model']:
+            print(f"               Model: {config['custom_model']}")
         print(f"               Status: {status}")
     print("\n" + "=" * 60)
 
@@ -415,10 +428,6 @@ if __name__ == '__main__':
     if not args.experiment:
         print("Error: --experiment is required")
         print("Use --list to see available experiments")
-        sys.exit(1)
-    
-    if not args.data_path:
-        print("Error: --data-path is required")
         sys.exit(1)
     
     run_experiment(args)
