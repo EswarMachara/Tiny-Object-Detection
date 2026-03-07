@@ -8,3 +8,5 @@ Baseline_YOLOV11_Seg/
 .env
 .vscode/
 
+# Generated docs
+docs/
