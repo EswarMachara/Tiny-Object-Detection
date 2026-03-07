@@ -7,6 +7,7 @@ Provides common utilities for:
 - Dataset split loading
 - Path handling
 - Metrics computation
+- Label format validation
 """
 
 import os
@@ -267,3 +268,119 @@ def parse_yolo_results(results_csv_path: Path) -> Dict[str, Any]:
         'best_mAP50': best_mAP50,
         'final_metrics': final_row.to_dict()
     }
+
+
+def validate_label_format(dataset_path: Path, num_samples: int = 10) -> Dict[str, Any]:
+    """
+    Validate that labels are in detection format (not segmentation).
+    
+    Detection format: class_id center_x center_y width height (5 values)
+    Segmentation format: class_id x1 y1 x2 y2 x3 y3 ... (many values)
+    
+    Args:
+        dataset_path: Path to AI-TOD dataset root
+        num_samples: Number of label files to check
+        
+    Returns:
+        Dictionary with validation results:
+        {
+            'valid': bool,
+            'format': 'detection' or 'segmentation' or 'unknown',
+            'samples_checked': int,
+            'detection_count': int,
+            'segmentation_count': int,
+            'error_message': str or None,
+            'sample_file': str,
+            'sample_line': str
+        }
+    """
+    result = {
+        'valid': False,
+        'format': 'unknown',
+        'samples_checked': 0,
+        'detection_count': 0,
+        'segmentation_count': 0,
+        'error_message': None,
+        'sample_file': None,
+        'sample_line': None
+    }
+    
+    # Find label files
+    label_files = []
+    for split in ['train', 'test']:
+        labels_dir = dataset_path / split / 'labels'
+        if labels_dir.exists():
+            label_files.extend(list(labels_dir.glob('*.txt'))[:num_samples])
+    
+    if not label_files:
+        result['error_message'] = f"No label files found in {dataset_path}"
+        return result
+    
+    # Check each file
+    for label_file in label_files[:num_samples]:
+        try:
+            with open(label_file, 'r') as f:
+                lines = [l.strip() for l in f.readlines() if l.strip()]
+            
+            if not lines:
+                continue
+            
+            for line in lines[:5]:  # Check first 5 lines of each file
+                parts = line.split()
+                if len(parts) == 5:
+                    result['detection_count'] += 1
+                elif len(parts) > 5:
+                    result['segmentation_count'] += 1
+                    if result['sample_file'] is None:
+                        result['sample_file'] = str(label_file.name)
+                        result['sample_line'] = line[:100]
+            
+            result['samples_checked'] += 1
+            
+        except Exception as e:
+            continue
+    
+    # Determine format
+    total = result['detection_count'] + result['segmentation_count']
+    
+    if total == 0:
+        result['error_message'] = "Could not determine format (empty files?)"
+        return result
+    
+    if result['segmentation_count'] > 0:
+        result['format'] = 'segmentation'
+        result['valid'] = False
+        result['error_message'] = (
+            f"Labels are in SEGMENTATION format (polygon), not detection!\n"
+            f"Found {result['segmentation_count']} segmentation lines vs {result['detection_count']} detection lines.\n"
+            f"Sample file: {result['sample_file']}\n"
+            f"Sample line: {result['sample_line']}\n\n"
+            f"Fix: Run the conversion script first:\n"
+            f"  python scripts/convert_seg_to_det.py --dataset_path \"{dataset_path}\"\n\n"
+            f"Also delete any cache files:\n"
+            f"  rm {dataset_path}/train/labels.cache\n"
+            f"  rm {dataset_path}/test/labels.cache"
+        )
+    else:
+        result['format'] = 'detection'
+        result['valid'] = True
+    
+    return result
+
+
+def clear_yolo_cache(dataset_path: Path) -> None:
+    """
+    Clear YOLO label cache files that might cause issues.
+    
+    Args:
+        dataset_path: Path to AI-TOD dataset root
+    """
+    cache_files = [
+        dataset_path / 'train' / 'labels.cache',
+        dataset_path / 'test' / 'labels.cache',
+    ]
+    
+    for cache_file in cache_files:
+        if cache_file.exists():
+            cache_file.unlink()
+            print(f"Deleted cache: {cache_file}")

@@ -41,7 +41,9 @@ from utils import (
     print_section,
     format_time,
     get_timestamp,
-    ensure_dir
+    ensure_dir,
+    validate_label_format,
+    clear_yolo_cache
 )
 
 
@@ -109,6 +111,28 @@ def train_model(args):
     
     print(f"Repository root: {repo_root}")
     print(f"Dataset path: {dataset_path}")
+    
+    # CRITICAL: Validate label format before training
+    if not getattr(args, 'skip_validation', False):
+        print("\nValidating label format...")
+        label_check = validate_label_format(dataset_path)
+        
+        if not label_check['valid']:
+            print("\n" + "=" * 60)
+            print("ERROR: LABEL FORMAT VALIDATION FAILED!")
+            print("=" * 60)
+            print(label_check['error_message'])
+            print("=" * 60)
+            sys.exit(1)
+        else:
+            print(f"✓ Labels are in correct detection format ({label_check['detection_count']} samples checked)")
+    else:
+        print("\n⚠ Skipping label format validation (--skip-validation)")
+    
+    # Clear any stale cache files
+    if getattr(args, 'clear_cache', False):
+        print("\nClearing YOLO cache files...")
+        clear_yolo_cache(dataset_path)
     
     # Load splits
     splits_path = repo_root / "configs" / "data_splits.json"
@@ -362,6 +386,18 @@ def parse_args():
         type=str,
         default=None,
         help='Override auto-detected dataset path'
+    )
+    
+    # Validation and caching
+    parser.add_argument(
+        '--clear-cache',
+        action='store_true',
+        help='Clear YOLO label cache files before training'
+    )
+    parser.add_argument(
+        '--skip-validation',
+        action='store_true',
+        help='Skip label format validation (not recommended)'
     )
     
     return parser.parse_args()
