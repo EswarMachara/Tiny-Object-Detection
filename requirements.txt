@@ -1,0 +1,31 @@
+# Requirements for AI-TOD Tiny Object Detection Pipeline
+# =====================================================
+#
+# Install with: pip install -r requirements.txt
+
+# Core dependencies
+ultralytics>=8.0.0
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Data processing
+numpy>=1.21.0
+pandas>=1.3.0
+Pillow>=9.0.0
+
+# Visualization
+matplotlib>=3.5.0
+seaborn>=0.11.0
+
+# Configuration
+pyyaml>=6.0
+
+# Progress bars
+tqdm>=4.60.0
+
+# Optional: for notebook support
+ipykernel>=6.0.0
+ipywidgets>=7.6.0
+
+# Optional: for advanced metrics
+pycocotools>=2.0.0

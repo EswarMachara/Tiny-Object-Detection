@@ -1,0 +1,56 @@
+# AI-TOD Dataset Configuration for Ultralytics YOLO
+# ================================================
+#
+# This config file follows Ultralytics format but actual splits
+# are controlled by configs/data_splits.json for reproducibility.
+#
+# Dataset: AI-TOD (Aerial Images for Tiny Object Detection)
+# Images: 27,955 total (800x800 resolution)
+# Objects: 697,586 total
+# Classes: 8
+
+# Path to dataset root (update for your environment)
+# Kaggle: /kaggle/input/ai-tod-dataset/AI_TOD
+# Local: ./AI_TOD
+path: /kaggle/input/ai-tod-dataset/AI_TOD
+
+# Dataset splits (relative to path)
+# Note: Actual train/val split is controlled by data_splits.json
+train: train/images
+val: train/images
+test: test/images
+
+# Number of classes
+nc: 8
+
+# Class names
+names:
+  0: airplane
+  1: bridge
+  2: person
+  3: ship
+  4: storage-tank
+  5: swimming-pool
+  6: vehicle
+  7: wind-mill
+
+# Dataset statistics (from audit)
+# ================================
+# Total images: 27,955
+#   - Train folder: 19,462
+#   - Test folder: 8,493
+#
+# Class distribution:
+#   - vehicle: 87.82% (dominant class)
+#   - ship: 5.01%
+#   - person: 4.67%
+#   - storage-tank: 1.92%
+#   - airplane: 0.22%
+#   - bridge: 0.19%
+#   - swimming-pool: 0.09%
+#   - wind-mill: 0.08%
+#
+# Object sizes:
+#   - 85.25% are tiny (< 16x16 pixels)
+#   - 98.05% are < 32x32 pixels
+#   - Mean object size: ~14x14 pixels
