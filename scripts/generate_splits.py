@@ -14,9 +14,11 @@ import os
 import sys
 import json
 import random
+import hashlib
 import argparse
 from pathlib import Path
 from typing import List, Dict, Tuple
+from datetime import datetime
 
 
 def set_seed(seed: int = 42) -> None:
@@ -125,6 +127,16 @@ def generate_splits(dataset_path: Path, output_path: Path,
     print(f"  Val:   {len(val_split)} images ({len(val_split)/len(train_images)*100:.1f}%)")
     print(f"  Test:  {len(test_images)} images")
     
+    # Create paths lists
+    train_paths = [f"train/images/{img}" for img in train_split]
+    val_paths = [f"train/images/{img}" for img in val_split]
+    test_paths = [f"test/images/{img}" for img in test_images]
+    
+    # Compute hash for reproducibility verification
+    all_paths = train_paths + val_paths + test_paths
+    content = '\n'.join(all_paths)
+    split_hash = hashlib.sha256(content.encode()).hexdigest()
+    
     # Create splits dictionary with relative paths
     splits = {
         "metadata": {
@@ -132,11 +144,13 @@ def generate_splits(dataset_path: Path, output_path: Path,
             "train_ratio": train_ratio,
             "total_train_images": len(train_images),
             "total_test_images": len(test_images),
+            "hash": split_hash,
+            "created": datetime.now().isoformat(),
             "generated_by": "generate_splits.py"
         },
-        "train": [f"train/images/{img}" for img in train_split],
-        "val": [f"train/images/{img}" for img in val_split],
-        "test": [f"test/images/{img}" for img in test_images]
+        "train": train_paths,
+        "val": val_paths,
+        "test": test_paths
     }
     
     # Ensure output directory exists
@@ -147,6 +161,7 @@ def generate_splits(dataset_path: Path, output_path: Path,
         json.dump(splits, f, indent=2)
     
     print(f"\nSplits saved to: {output_path}")
+    print(f"Hash: {split_hash[:16]}...")
     
     return splits
 
@@ -233,23 +248,30 @@ def main():
     
     # Auto-detect dataset path
     if args.dataset_path is None:
-        # Try common locations
+        # Try LOCAL paths first, then Kaggle
         possible_paths = [
+            repo_root / "AI_TOD",  # Local repo
+            Path.cwd() / "AI_TOD",  # Current working directory
+            Path("AI_TOD"),  # Relative
+            Path("../AI_TOD"),  # Parent directory
+            repo_root.parent / "AI_TOD",  # Sibling to repo
             Path("/kaggle/input/ai-tod-dataset/AI_TOD"),  # Kaggle
             Path("/kaggle/input/ai-tod-yolo-8"),  # Kaggle alternative
-            repo_root / "AI_TOD",  # Local
-            Path("AI_TOD"),  # Current directory
         ]
         
         for p in possible_paths:
-            if p.exists():
-                args.dataset_path = str(p)
-                print(f"Auto-detected dataset path: {p}")
-                break
+            try:
+                if p.exists() and (p / "train").exists():
+                    args.dataset_path = str(p.resolve())
+                    print(f"Auto-detected dataset path: {p.resolve()}")
+                    break
+            except Exception:
+                continue
         
         if args.dataset_path is None:
             print("Error: Could not auto-detect dataset path.")
-            print("Please specify --dataset_path")
+            print("Please specify --dataset_path explicitly.")
+            print("Example: python scripts/generate_splits.py --dataset_path /path/to/AI_TOD")
             sys.exit(1)
     
     dataset_path = Path(args.dataset_path)

@@ -71,23 +71,31 @@ def get_dataset_path() -> Path:
     """
     repo_root = get_repo_root()
     
-    # Try common locations in order
+    # Try local paths FIRST, then Kaggle
     possible_paths = [
-        Path("/kaggle/input/ai-tod-dataset/AI_TOD"),  # Kaggle primary
-        Path("/kaggle/input/ai-tod-yolo-8"),  # Kaggle alternative
+        # Local paths (prioritized)
         repo_root / "AI_TOD",  # Local repo
-        Path("AI_TOD"),  # Current directory
+        Path.cwd() / "AI_TOD",  # Current working directory
+        Path("AI_TOD"),  # Relative to cwd
         Path("../AI_TOD"),  # Parent directory
+        repo_root.parent / "AI_TOD",  # Sibling to repo
+        # Kaggle paths (fallback)
+        Path("/kaggle/input/ai-tod-dataset/AI_TOD"),
+        Path("/kaggle/input/ai-tod-yolo-8"),
     ]
     
     for p in possible_paths:
-        if p.exists() and (p / "train").exists():
-            return p.resolve()
+        try:
+            if p.exists() and (p / "train").exists():
+                print(f"Auto-detected dataset at: {p.resolve()}")
+                return p.resolve()
+        except Exception:
+            continue
     
     raise FileNotFoundError(
-        "Could not find AI-TOD dataset. "
-        "Please ensure dataset is available at one of: " + 
-        ", ".join(str(p) for p in possible_paths)
+        "Could not find AI-TOD dataset.\n"
+        "Please specify --data-path explicitly.\n"
+        "Example: python scripts/train_baseline.py --data-path /path/to/AI_TOD"
     )
 
 
