@@ -1,0 +1,105 @@
+# YOLOv11m Full Model for Tiny Object Detection
+# ============================================================
+#
+# Complete architecture with all proposed components:
+# 1. P2 Head (stride 4) - Higher resolution features
+# 2. BiFPN Neck - Bidirectional multi-scale fusion
+# 3. TAAM - Tiny-Aware Attention Module (NOVEL)
+# 4. Anchor-Free Detection - Native YOLOv11 
+#
+# Note: NWD Loss is applied via custom training script
+#
+# Expected gains over baseline:
+# - P2: +2-4% mAP (higher resolution)
+# - BiFPN: +1-2% mAP (better fusion)
+# - TAAM: +1-3% mAP (scale-aware attention)
+# - NWD: +2-4% mAP (smoother gradients for tiny objects)
+
+# Parameters
+nc: 8  # AI-TOD classes
+
+scales:
+  # [depth, width, max_channels]
+  m: [0.50, 1.00, 512]  # YOLOv11m scale
+
+# Backbone (same as P2 version)
+backbone:
+  # [from, repeats, module, args]
+  - [-1, 1, Conv, [64, 3, 2]]          # 0-P1/2
+  - [-1, 1, Conv, [128, 3, 2]]         # 1-P2/4
+  - [-1, 2, C3k2, [256, False, 0.25]]  # 2 - P2 features (stride 4)
+  - [-1, 1, Conv, [256, 3, 2]]         # 3-P3/8
+  - [-1, 2, C3k2, [512, False, 0.25]]  # 4 - P3 features
+  - [-1, 1, Conv, [512, 3, 2]]         # 5-P4/16
+  - [-1, 2, C3k2, [512, True]]         # 6 - P4 features
+  - [-1, 1, Conv, [1024, 3, 2]]        # 7-P5/32
+  - [-1, 2, C3k2, [1024, True]]        # 8 - P5 features
+  - [-1, 1, SPPF, [1024, 5]]           # 9
+  - [-1, 2, C2PSA, [1024]]             # 10
+
+# BiFPN-style Head with P2 + TAAM
+head:
+  # ============== BiFPN Round 1: Top-Down ==============
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]  # 11
+  - [[-1, 6], 1, Concat, [1]]                    # 12 - fuse with P4
+  - [-1, 1, C3k2, [512, False]]                  # 13 - P4_td1
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]  # 14
+  - [[-1, 4], 1, Concat, [1]]                    # 15 - fuse with P3
+  - [-1, 1, C3k2, [256, False]]                  # 16 - P3_td1
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]  # 17
+  - [[-1, 2], 1, Concat, [1]]                    # 18 - fuse with P2
+  - [-1, 1, C3k2, [128, False]]                  # 19 - P2_td1
+
+  # ============== BiFPN Round 1: Bottom-Up ==============
+  - [-1, 1, Conv, [128, 3, 2]]                   # 20 - downsample P2
+  - [[-1, 16], 1, Concat, [1]]                   # 21 - fuse with P3_td1
+  - [-1, 1, C3k2, [256, False]]                  # 22 - P3_bu1
+
+  - [-1, 1, Conv, [256, 3, 2]]                   # 23 - downsample P3
+  - [[-1, 13], 1, Concat, [1]]                   # 24 - fuse with P4_td1
+  - [-1, 1, C3k2, [512, False]]                  # 25 - P4_bu1
+
+  - [-1, 1, Conv, [512, 3, 2]]                   # 26 - downsample P4
+  - [[-1, 10], 1, Concat, [1]]                   # 27 - fuse with P5
+  - [-1, 1, C3k2, [512, False]]                  # 28 - P5_bu1
+
+  # ============== BiFPN Round 2: Top-Down ==============
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]  # 29
+  - [[-1, 25, 6], 1, Concat, [1]]                # 30 - fuse P5_bu1 + P4_bu1 + backbone P4
+  - [-1, 1, C3k2, [512, False]]                  # 31 - P4_td2
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]  # 32
+  - [[-1, 22, 4], 1, Concat, [1]]                # 33 - fuse with P3_bu1 + backbone P3
+  - [-1, 1, C3k2, [256, False]]                  # 34 - P3_td2
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]  # 35
+  - [[-1, 19, 2], 1, Concat, [1]]                # 36 - fuse with P2_td1 + backbone P2
+  - [-1, 1, C3k2, [128, False]]                  # 37 - P2_td2
+
+  # ============== BiFPN Round 2: Bottom-Up ==============
+  - [-1, 1, Conv, [128, 3, 2]]                   # 38 - downsample P2
+  - [[-1, 34], 1, Concat, [1]]                   # 39 - fuse with P3_td2
+  - [-1, 1, C3k2, [256, False]]                  # 40 - P3_bu2
+
+  - [-1, 1, Conv, [256, 3, 2]]                   # 41 - downsample P3
+  - [[-1, 31], 1, Concat, [1]]                   # 42 - fuse with P4_td2
+  - [-1, 1, C3k2, [512, False]]                  # 43 - P4_bu2
+
+  - [-1, 1, Conv, [512, 3, 2]]                   # 44 - downsample P4
+  - [[-1, 28], 1, Concat, [1]]                   # 45 - fuse with P5_bu1
+  - [-1, 1, C3k2, [1024, True]]                  # 46 - P5_bu2
+
+  # ============== TAAM: Tiny-Aware Attention ==============
+  # Apply TAAM to each feature level before detection
+  # TAAM enhances features using scale-aware attention
+  # Note: P5 is capped at 512 due to max_channels in scales
+  - [37, 1, TAAM, [128]]                         # 47 - TAAM on P2 (128 ch)
+  - [40, 1, TAAM, [256]]                         # 48 - TAAM on P3 (256 ch)
+  - [43, 1, TAAM, [512]]                         # 49 - TAAM on P4 (512 ch)
+  - [46, 1, TAAM, [512]]                         # 50 - TAAM on P5 (512 ch, capped)
+
+  # ============== Detection Heads ==============
+  # Detect on TAAM-enhanced features
+  - [[47, 48, 49, 50], 1, Detect, [nc]]          # 51 - Detect(P2, P3, P4, P5)

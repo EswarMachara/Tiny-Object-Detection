@@ -28,14 +28,16 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 
-# Add scripts directory to path
+# Add scripts directory and project root to path
+PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "models"))
+
 from utils import (
     set_all_seeds,
     get_repo_root,
     get_dataset_path,
-    load_splits,
-    create_subset_txt,
     print_section,
     format_time,
     get_timestamp,
@@ -43,6 +45,38 @@ from utils import (
     validate_label_format,
     clear_yolo_cache
 )
+
+
+def register_custom_modules():
+    """Register custom modules (TAAM) with Ultralytics."""
+    try:
+        from models.taam import TAAM, TAAMBlock
+        import ultralytics.nn.modules as modules
+        
+        # Register TAAM
+        if not hasattr(modules, 'TAAM'):
+            modules.TAAM = TAAM
+            modules.__all__.append('TAAM')
+        
+        if not hasattr(modules, 'TAAMBlock'):
+            modules.TAAMBlock = TAAMBlock
+            modules.__all__.append('TAAMBlock')
+        
+        # Also add to tasks module
+        try:
+            from ultralytics.nn import tasks
+            if not hasattr(tasks, 'TAAM'):
+                tasks.TAAM = TAAM
+            if not hasattr(tasks, 'TAAMBlock'):
+                tasks.TAAMBlock = TAAMBlock
+        except ImportError:
+            pass
+        
+        print("✓ Registered custom modules: TAAM")
+        return True
+    except ImportError as e:
+        print(f"Warning: Could not register TAAM: {e}")
+        return False
 
 
 # Experiment configurations
@@ -86,17 +120,12 @@ EXPERIMENTS = {
 }
 
 
-def create_data_config(dataset_path: Path, splits: dict, output_dir: Path) -> Path:
-    """Create YOLO data configuration file."""
+def create_data_config(dataset_path: Path, output_dir: Path) -> Path:
+    """Create YOLO data configuration file using physically split directories."""
     import yaml
     
-    # Create image list files
-    train_txt = output_dir / "train.txt"
-    val_txt = output_dir / "val.txt"
-    
-    create_subset_txt(splits['train'], dataset_path, train_txt)
-    create_subset_txt(splits['val'], dataset_path, val_txt)
-    
+    # Use physically split train/val directories to avoid cache collision
+    # (both would otherwise use same cache file since images come from same folder)
     class_names = [
         'airplane', 'bridge', 'person', 'ship',
         'storage-tank', 'swimming-pool', 'vehicle', 'wind-mill'
@@ -104,9 +133,9 @@ def create_data_config(dataset_path: Path, splits: dict, output_dir: Path) -> Pa
     
     config = {
         'path': str(dataset_path.resolve()),
-        'train': str(train_txt.resolve()),
-        'val': str(val_txt.resolve()),
-        'test': str(dataset_path / "test" / "images"),
+        'train': 'train/images',
+        'val': 'val/images',
+        'test': 'test/images',
         'nc': len(class_names),
         'names': {i: name for i, name in enumerate(class_names)}
     }
@@ -162,14 +191,31 @@ def run_experiment(args):
     else:
         print(f"✓ Labels are in correct detection format ({label_check['detection_count']} samples checked)")
     
-    # Clear cache if requested
-    if getattr(args, 'clear_cache', False):
-        print("\nClearing YOLO cache files...")
-        clear_yolo_cache(dataset_path)
+    # ALWAYS clear cache files to prevent train/val cache collision
+    print("\nClearing YOLO cache files...")
+    clear_yolo_cache(dataset_path)
     
-    # Load splits
-    splits_path = repo_root / "configs" / "data_splits.json"
-    splits = load_splits(splits_path)
+    # Verify train/val directories exist
+    train_images_dir = dataset_path / "train" / "images"
+    val_images_dir = dataset_path / "val" / "images"
+    
+    if not train_images_dir.exists():
+        print(f"ERROR: Train images directory not found: {train_images_dir}")
+        print("Run 'python scripts/split_train_val.py' first to create val split.")
+        sys.exit(1)
+    
+    if not val_images_dir.exists():
+        print(f"ERROR: Val images directory not found: {val_images_dir}")
+        print("Run 'python scripts/split_train_val.py' first to create val split.")
+        sys.exit(1)
+    
+    # Count images
+    train_count = len(list(train_images_dir.glob("*")))
+    val_count = len(list(val_images_dir.glob("*")))
+    
+    print(f"\nDataset split:")
+    print(f"  Train images: {train_count}")
+    print(f"  Val images:   {val_count}")
     
     # Create unique output directory for this experiment
     timestamp = get_timestamp()
@@ -182,7 +228,7 @@ def run_experiment(args):
     print(f"This experiment is INDEPENDENT and will NOT overwrite others.")
     
     # Create data config
-    data_config = create_data_config(dataset_path, splits, output_dir)
+    data_config = create_data_config(dataset_path, output_dir)
     
     # Save experiment metadata
     metadata = {
@@ -203,6 +249,19 @@ def run_experiment(args):
     
     with open(output_dir / "experiment_config.json", 'w') as f:
         json.dump(metadata, f, indent=2)
+    
+    # Handle 'full' experiment separately (requires NWD loss patching)
+    if args.experiment == 'full':
+        print("\n" + "=" * 60)
+        print("NOTE: For the 'full' experiment with NWD loss, use:")
+        print("  python scripts/train_full.py --epochs 50 --batch 8")
+        print("=" * 60)
+        print("\nContinuing with TAAM model (without NWD loss)...")
+        print("To get full benefits, run train_full.py instead.\n")
+    
+    # Register custom modules (TAAM) BEFORE importing YOLO
+    if args.experiment in ['taam', 'anchorfree', 'full']:
+        register_custom_modules()
     
     # Import YOLO
     from ultralytics import YOLO
@@ -226,7 +285,10 @@ def run_experiment(args):
         print(f"\nLoading model: {exp_config['model']}")
         model = YOLO(exp_config['model'])
     
-    # Training arguments (CONSISTENT across all experiments)
+    # Training arguments - USE YOLO DEFAULTS to prevent training collapse!
+    # Previous version caused NaN/0 losses due to:
+    # 1. Custom optimizer/lr settings conflicting with YOLO internals
+    # 2. AMP issues with high initial cls_loss
     train_args = {
         'data': str(data_config),
         'epochs': args.epochs,
@@ -235,29 +297,17 @@ def run_experiment(args):
         'patience': args.patience,
         'seed': args.seed,
         'device': args.device,
-        'optimizer': 'AdamW',
-        'lr0': 0.001,
         'project': str(output_dir),
         'name': 'train',
         'exist_ok': True,
         'verbose': True,
         'deterministic': True,
-        'pretrained': True if exp_config['model'] else False,
-        # Augmentation (same for all experiments)
-        'mosaic': 1.0,
-        'mixup': 0.0,
-        'copy_paste': 0.0,
-        'degrees': 0.0,
-        'scale': 0.5,
-        'fliplr': 0.5,
-        'flipud': 0.0,
-        'hsv_h': 0.015,
-        'hsv_s': 0.7,
-        'hsv_v': 0.4,
-        # Warmup
-        'warmup_epochs': 3.0,
-        'weight_decay': 0.0005,
+        'pretrained': True,
+        # Disable mosaic for last 10 epochs (helps tiny objects)
+        'close_mosaic': 10,
     }
+    # Let YOLO handle: optimizer, lr0, warmup, weight_decay, AMP
+    # These defaults are battle-tested and prevent training collapse
     
     print(f"\nTraining Configuration:")
     print(f"  Epochs: {args.epochs}")
