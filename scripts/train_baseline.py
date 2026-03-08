@@ -200,14 +200,12 @@ def train_model(args):
     # Load model
     model = YOLO(args.model)
     
-    # Training arguments
+    # Training arguments - use mostly defaults since they work well
     train_args = {
         'data': str(config_path),
         'epochs': args.epochs,
         'batch': args.batch,
         'imgsz': args.imgsz,
-        'optimizer': args.optimizer,
-        'lr0': args.lr0,
         'patience': args.patience,
         'seed': seed,
         'device': args.device,
@@ -217,29 +215,9 @@ def train_model(args):
         'verbose': True,
         'deterministic': True,
         'pretrained': True,
-        # Disable AMP to prevent gradient overflow with tiny objects
-        # (high cls_loss can cause numerical instability with float16)
-        'amp': False,
-        # Additional augmentation settings for tiny objects
-        'mosaic': 1.0,  # Enable mosaic augmentation
-        'mixup': 0.0,   # Disable mixup (can harm tiny objects)
-        'copy_paste': 0.0,  # Disable copy-paste
-        'degrees': 0.0,  # No rotation (preserve tiny object shapes)
-        'scale': 0.5,    # Moderate scaling
-        'fliplr': 0.5,   # Horizontal flip
-        'flipud': 0.0,   # No vertical flip
-        'hsv_h': 0.015,  # Hue augmentation
-        'hsv_s': 0.7,    # Saturation augmentation
-        'hsv_v': 0.4,    # Value augmentation
+        # Disable mosaic for last 10 epochs (helps tiny objects)
+        'close_mosaic': 10,
     }
-    
-    # Add warmup settings
-    train_args['warmup_epochs'] = 3.0
-    train_args['warmup_bias_lr'] = 0.1
-    train_args['warmup_momentum'] = 0.8
-    
-    # Add weight decay
-    train_args['weight_decay'] = 0.0005
     
     # Start training
     print_section("Starting Training")
@@ -355,8 +333,8 @@ def parse_args():
     parser.add_argument(
         '--lr0',
         type=float,
-        default=0.001,
-        help='Initial learning rate (default: 0.001)'
+        default=0.0005,
+        help='Initial learning rate (default: 0.0005, lower for tiny objects)'
     )
     parser.add_argument(
         '--patience',
