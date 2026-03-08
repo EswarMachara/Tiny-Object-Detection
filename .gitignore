@@ -13,3 +13,6 @@ docs/
 
 # Notebooks
 notebooks/
+
+# cache files
+models/__pycache__/
