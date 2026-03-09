@@ -22,4 +22,6 @@ scripts/__pycache__/
 # Results
 results/
 
-
+# paper related contents
+paper/
+paper\TAAM_NWD_paper.tex
