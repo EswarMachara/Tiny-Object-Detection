@@ -27,7 +27,8 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 
-# Add scripts directory to path for imports
+# Add project root and scripts directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
 from utils import (
     get_repo_root, 
@@ -102,7 +103,22 @@ def evaluate_model(args):
     # Import ultralytics
     print("\nLoading YOLO model...")
     from ultralytics import YOLO
-    
+
+    # Register custom modules (needed for TAAM model weights)
+    try:
+        from models.taam import TAAM, TAAMBlock
+        import ultralytics.nn.modules as modules
+        import ultralytics.nn.tasks as tasks_module
+        for cls in [TAAM, TAAMBlock]:
+            name = cls.__name__
+            if not hasattr(modules, name):
+                setattr(modules, name, cls)
+            if not hasattr(tasks_module, name):
+                setattr(tasks_module, name, cls)
+        print("✓ Registered custom modules: TAAM, TAAMBlock")
+    except ImportError:
+        pass  # Not a TAAM model, skip
+
     # Load model
     model = YOLO(args.weights)
     
@@ -110,9 +126,9 @@ def evaluate_model(args):
     import yaml
     test_config = {
         'path': str(dataset_path.resolve()),
-        'test': str(dataset_path / "test" / "images"),
-        'val': str(dataset_path / "test" / "images"),  # Use test as val for evaluation
-        'train': str(dataset_path / "train" / "images"),  # Required but not used
+        'test': 'test/images',
+        'val': 'test/images',  # Use test as val for evaluation
+        'train': 'train/images',  # Required but not used
         'nc': len(class_names),
         'names': {i: name for i, name in enumerate(class_names)}
     }

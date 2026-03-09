@@ -15,11 +15,20 @@ pip install -r requirements.txt
 # Generate deterministic splits
 python scripts/generate_splits.py
 
-# Train YOLOv11M baseline
-python scripts/train_baseline.py --model yolo11m.pt --epochs 120
+# Split train into train/val physically
+python scripts/split_train_val.py
+
+# Train baseline
+python scripts/train_baseline.py --model yolo11m.pt --epochs 50
+
+# Train TAAM+NWD
+python scripts/train_taam.py --epochs 50
 
 # Evaluate on test set
-python scripts/evaluate_baseline.py --weights results/baseline/<run_name>/best.pt
+python scripts/evaluate_baseline.py --weights results/taam/<run_name>/best.pt
+
+# SAHI evaluation
+python scripts/evaluate_sahi.py --weights results/taam/<run_name>/best.pt --slice-size 400 --compare-standard
 ```
 
 ## Reproducibility
@@ -73,29 +82,34 @@ python scripts/generate_splits.py --verify
 ## Project Structure
 
 ```
-TOD_Mini_Project/
-├── AI_TOD/                      # Dataset (not in repo)
-│   ├── train/
-│   │   ├── images/
-│   │   └── labels/
-│   └── test/
-│       ├── images/
-│       └── labels/
+Tiny-Object-Detection/
+├── AI_TOD/                        # Dataset
+│   ├── train/images/ & labels/    # Training set (17,516 images)
+│   ├── val/images/ & labels/      # Validation set (1,946 images)
+│   ├── test/images/ & labels/     # Test set (8,493 images)
+│   └── data.yaml                  # Ultralytics dataset config
 ├── configs/
-│   ├── ai_tod.yaml              # YOLO dataset config
-│   └── data_splits.json         # Deterministic splits (generated)
+│   ├── ai_tod.yaml                # YOLO dataset config (documented)
+│   └── data_splits.json           # Deterministic train/val/test splits
+├── models/
+│   ├── yolo11m_taam.yaml          # TAAM architecture definition
+│   ├── taam.py                    # TAAM module implementation
+│   └── nwd_loss.py                # NWD loss implementation
 ├── scripts/
-│   ├── generate_splits.py       # Create reproducible splits
-│   ├── train_baseline.py        # Training script
-│   ├── evaluate_baseline.py     # Test evaluation script
-│   └── utils.py                 # Shared utilities
-├── notebooks/
-│   └── kaggle_baseline_training.ipynb  # Complete Kaggle notebook
+│   ├── train_baseline.py          # Baseline YOLOv11m training
+│   ├── train_taam.py              # TAAM+NWD training with weight transfer
+│   ├── evaluate_baseline.py       # Test evaluation (model.val())
+│   ├── evaluate_sahi.py           # SAHI sliced inference evaluation
+│   ├── generate_splits.py         # Create reproducible splits
+│   ├── split_train_val.py         # Physical train/val split
+│   ├── convert_seg_to_det.py      # Segmentation → detection label conversion
+│   └── utils.py                   # Shared utilities
 ├── results/
-│   └── baseline/                # Training outputs
-├── docs/
-│   ├── dataset_audit.md         # Dataset analysis report
-│   └── baseline_analysis.md     # Baseline experiment analysis
+│   ├── baseline/                  # Baseline training + test eval
+│   ├── taam/                      # TAAM+NWD training + test eval
+│   └── sahi/                      # SAHI evaluation results
+├── yolo11m.pt                     # Pretrained COCO weights
+├── EXPERIMENT_REPORT.md           # Detailed experiment report
 ├── requirements.txt
 └── README.md
 ```
@@ -107,11 +121,11 @@ TOD_Mini_Project/
 | Parameter | Value | Rationale |
 |-----------|-------|-----------|
 | `imgsz` | 800 | Preserve original resolution |
-| `epochs` | 120 | Allow sufficient convergence |
-| `batch` | 16 | Balance memory/throughput |
+| `epochs` | 50 | Sufficient for convergence |
+| `batch` | 8 | RTX A5000 24GB (nbs=64 gradient accumulation) |
 | `optimizer` | AdamW | Better for fine-tuning |
-| `lr0` | 0.001 | Conservative for pretrained |
-| `patience` | 30 | Prevent premature stopping |
+| `lr0` | 0.0005 | Conservative for pretrained |
+| `patience` | 10 | Early stopping |
 
 ### Augmentation Settings
 
@@ -138,52 +152,47 @@ This creates `configs/data_splits.json` with:
 ### 2. Train Models
 
 ```bash
-# YOLOv11M (recommended baseline)
-python scripts/train_baseline.py --model yolo11m.pt --epochs 120
+# Baseline YOLOv11M
+python scripts/train_baseline.py --model yolo11m.pt --epochs 50
 
-# YOLOv11L (larger model)
-python scripts/train_baseline.py --model yolo11l.pt --epochs 120 --batch 8
-
-# YOLOv11S (faster training)
-python scripts/train_baseline.py --model yolo11s.pt --epochs 120 --batch 32
-
-# Custom configuration
-python scripts/train_baseline.py \
-    --model yolo11m.pt \
-    --epochs 150 \
-    --batch 8 \
-    --imgsz 1280 \
-    --lr0 0.0005
+# TAAM+NWD (Tiny-Aware Attention + Normalized Wasserstein Distance)
+python scripts/train_taam.py --epochs 50
 ```
 
 ### 3. Evaluate on Test Set
 
 ```bash
-python scripts/evaluate_baseline.py --weights results/baseline/<run>/best.pt
+# Standard evaluation
+python scripts/evaluate_baseline.py --weights results/taam/<run>/best.pt
+
+# SAHI sliced inference evaluation
+python scripts/evaluate_sahi.py \
+    --weights results/taam/<run>/best.pt \
+    --slice-size 400 --overlap 0.2 --compare-standard
 ```
 
 Output includes:
-- `test_results.json` - Detailed metrics
-- `test_metrics.csv` - Per-class breakdown
+- `test_results.json` — Detailed metrics
+- `test_metrics.csv` — Per-class breakdown
 - Confusion matrix and PR curves
 
-### 4. Kaggle Notebook
+## Results
 
-The notebook `notebooks/kaggle_baseline_training.ipynb` provides:
-- Self-contained, single "Run All" execution
-- Automatic dataset path detection
-- Complete train → evaluate → visualize pipeline
+### Test Set Performance
 
-## Expected Results
+| Model | mAP50 | mAP50-95 | Precision | Recall |
+|-------|-------|----------|-----------|--------|
+| YOLOv11m Baseline | 60.07% | 27.33% | 65.03% | 58.95% |
+| YOLOv11m + TAAM + NWD | 60.98% | 27.99% | 62.73% | 59.71% |
 
-Based on previous experiments:
+### With SAHI (400×400 slices)
 
-| Model | Val mAP50 | Val mAP50-95 | Parameters |
-|-------|-----------|--------------|------------|
-| YOLOv11M | ~53% | ~24% | 22.4M |
-| YOLOv11L | ~53% | ~24% | 27.6M |
+| Model | mAP50 | Recall | Δ mAP50 |
+|-------|-------|--------|----------|
+| Baseline + SAHI | 59.02% | 89.01% | +0.18% |
+| TAAM+NWD + SAHI | 60.22% | 89.07% | +0.98% |
 
-**Note**: These are validation metrics. Test set performance may differ.
+See [EXPERIMENT_REPORT.md](EXPERIMENT_REPORT.md) for detailed analysis.
 
 ## Key Findings
 
@@ -195,15 +204,14 @@ Based on previous experiments:
 
 ### Recommendations for Improvement
 
-1. Add P2 detection head (stride 4) for finer detection
-2. Use higher input resolution (1280×1280)
-3. Apply class-balanced sampling or focal loss
-4. Consider specialized tiny object architectures
+1. Use higher input resolution (1280×1280)
+2. Apply class-balanced sampling or focal loss
+3. Use SAHI for offline/batch processing to boost recall
+4. Tune NWD weight (α) — only α=0.5 was tested
 
 ## Documentation
 
-- [Dataset Audit Report](docs/dataset_audit.md) - Comprehensive dataset analysis
-- [Baseline Analysis Report](docs/baseline_analysis.md) - Previous experiment insights
+- [Experiment Report](EXPERIMENT_REPORT.md) — Detailed report covering all experiments, issues, and fixes
 
 ## Citation
 
