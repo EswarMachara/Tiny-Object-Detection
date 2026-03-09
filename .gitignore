@@ -16,3 +16,6 @@ notebooks/
 
 # cache files
 models/__pycache__/
+
+# Results
+results/
